@@ -1,1 +1,5 @@
-.IG
+IG
+testing*
+checkpoints
+log
+VAE/__pycache__
