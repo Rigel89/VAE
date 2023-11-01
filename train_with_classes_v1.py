@@ -4,9 +4,9 @@
 #
 #   File name   : train.py
 #   Author      : Rigel89
-#   Created date: 17/10/23
+#   Created date: 27/10/23
 #   GitHub      : https://github.com/Rigel89/VAE
-#   Description : training script
+#   Description : training script, VAE autoencoder + classes recognition
 #
 #================================================================
 
@@ -14,7 +14,7 @@
 
 import tensorflow as tf
 from numpy import pi as PI
-from tqdm import tqdm, trange
+from tqdm import tqdm
 
 #This code must be here because has to be set before made other operations (quit, ugly solution!!)
 print('SETTING UP GPUs')
@@ -72,10 +72,9 @@ def main():
     test = tf.data.Dataset.from_tensor_slices((x_test,y_test))
 
     #Labels names
-    names = ['One','Two','Three','Four','Five','Six','Seven','Eigth','Nine']
-    one_hot_names = one_hot_encoder(names)
+    one_hot_names = one_hot_encoder(CLASSES_NAMES)
     print('Creating ')
-    hot_encoding_dic = create_name_file(names, one_hot_names, path='.\\', file_name='classes.names', overwrite=False)
+    hot_encoding_dic = create_name_file(CLASSES_NAMES, one_hot_names, path='.\\', file_name='classes.names', overwrite=False)
 
     # Preprocessing dataset images and labels
     train = train.map(lambda x, y: (exp_dims(img_norm(x)), translate_to_hot_encoding(y, one_hot_names)),
@@ -96,7 +95,7 @@ def main():
     print('Creating neuronal network')
     
 
-    VAE, mnist_gen_model, encoder_model  = VAE_autoencoder(latent_dim_shape=LATENT_DIMENSION, image_shape=INPUT_IMAGE_SIZE)
+    VAE, mnist_gen_model, encoder_model  = VAE_classes(latent_dim_shape=LATENT_DIMENSION, number_of_classes=NUMBER_OF_CLASSES, image_shape=INPUT_IMAGE_SIZE)
 
     print('Training from checkpoint: ' + str(TRAIN_FROM_CHECKPOINT))
     if TRAIN_FROM_CHECKPOINT:
@@ -120,15 +119,15 @@ def main():
 
     def train_step(image_data, target):
         with tf.GradientTape() as tape:
-            reconstruted_image = VAE(image_data, training=True) # There is BatchNormalization layers, so training=True to train the parameters
-            mu, sigma, _ =  encoder_model(image_data, training=True)
+            reconstruted_image = VAE([image_data, target], training=True) # There is BatchNormalization layers, so training=True to train the parameters
+            mu, sigma, _ =  encoder_model([image_data,target], training=True)
 
             # compute reconstruction loss
             KL_loss = bce = 0
-            KL_loss = kl_reconstruction_loss(mu, sigma)
+            KL_loss = kl_reconstruction_loss(mu, sigma) * TRAIN_BATCH * LAMBDA_LK# Added TRAIN_BATCH, will the behaviour improve)
             flattened_inputs = tf.reshape(image_data, shape=[-1])
             flattened_outputs = tf.reshape(reconstruted_image, shape=[-1])
-            bce = bce_loss(flattened_inputs, flattened_outputs) * image_pixels
+            bce = bce_loss(flattened_inputs, flattened_outputs) * image_pixels # Mean_of_batch((Mean for bce for each pixel)*Num_pixels)
             total_loss = KL_loss + bce
             loss_mean = loss_metric(total_loss)
 
@@ -153,19 +152,19 @@ def main():
                 tf.summary.scalar("loss/KL_loss", KL_loss, step=global_steps)
                 tf.summary.scalar("loss/BCE_loss", bce, step=global_steps)
                 tf.summary.scalar("loss/mean", loss_mean, step=global_steps)
-                tf.summary.image("Images", reconstruted_image[0:5], max_outputs=5, step=1)
+                #tf.summary.image("Images", reconstruted_image[0:5], max_outputs=5, step=1)
             writer.flush()
             global_steps.assign_add(1)
         return global_steps.numpy(), optimizer.lr.numpy(), KL_loss.numpy(), bce.numpy(), loss_mean.numpy()
 
     validate_writer = tf.summary.create_file_writer(TRAIN_LOGDIR)
     def validate_step(image_data, target):
-        reconstruted_image = VAE(image_data, training=True) # There is BatchNormalization layers, so training=True to train the parameters
-        mu, sigma, _ =  encoder_model(image_data, training=True)
+        reconstruted_image = VAE([image_data, target], training=False) # There is BatchNormalization layers, so training=True to train the parameters
+        mu, sigma, _ =  encoder_model([image_data, target], training=False)
 
         # Losses process
         KL_loss = bce = 0
-        KL_loss = kl_reconstruction_loss(mu, sigma)
+        KL_loss = kl_reconstruction_loss(mu, sigma) * TRAIN_BATCH # Added TRAIN_BATCH, will the behaviour improve)
         flattened_inputs = tf.reshape(image_data, shape=[-1])
         flattened_outputs = tf.reshape(reconstruted_image, shape=[-1])
         bce = bce_loss(flattened_inputs, flattened_outputs) * image_pixels
@@ -192,8 +191,8 @@ def main():
 
                 # Postfix will be displayed on the right,
                 # formatted automatically based on argument's datatype
-                tqdm_train.set_postfix(Details="KL_loss:{:4.4f}, BCE_loss:{:4.4f}, Mean_loss:{:4.4f}".format(results[1], results[2],
-                                                                                                         results[3], results[4]))
+                tqdm_train.set_postfix(Details="lr:{:.6f}, KL_loss:{:4.4f}, BCE_loss:{:4.4f}, Mean_loss:{:4.4f}".format(results[1], results[2],
+                                                                                                                        results[3], results[4]))
                 # print("epoch:{:2.0f} step:{:5.0f}/{}, lr:{:.6f}, KL_loss:{:4.4f}, BCE_loss:{:4.4f}, Mean_loss:{:4.4f}".format(epoch, cur_step, steps_per_epoch, results[1], results[2],
                 #             results[3], results[4]))
 
@@ -215,14 +214,20 @@ def main():
                     Mean_val += results[2]
                     total_val += results[3]
                     tqdm_test.set_postfix(Details="KL_val_loss:{:7.2f}, BCE_val_loss:{:7.2f}, Mean_val_loss:{:7.2f}".format(KL_val/count,
-                                                                                                                        BCE_val/count,
-                                                                                                                        Mean_val/count))
-                # writing validate summary data
+                                                                                                                            BCE_val/count,
+                                                                                                                            Mean_val/count))
+            # Creating images to show the evolution of the model
+            random_vector_for_generation = tf.random.normal(shape=[10, 28])
+            numbers = tf.one_hot(range(10),depth=10)
+            images_show = mnist_gen_model([random_vector_for_generation,numbers],training=False)
+
+            # writing validate summary data
             with validate_writer.as_default():
                 tf.summary.scalar("validate_loss/total_val", total_val/count, step=epoch)
                 tf.summary.scalar("validate_loss/KL_val", KL_val/count, step=epoch)
                 tf.summary.scalar("validate_loss/BCE_val", BCE_val/count, step=epoch)
                 tf.summary.scalar("validate_loss/Mean_val", Mean_val/count, step=epoch)
+                tf.summary.image("Images", images_show, max_outputs=10, step=epoch)
             validate_writer.flush()
             
             # print("\nValidation step-> KL_val_loss:{:7.2f}, BCE_val_loss:{:7.2f}, Mean_val_loss:{:7.2f}\n"

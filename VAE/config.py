@@ -14,6 +14,9 @@
 
 # Global parameters
 
+from tkinter import N
+
+
 NN_NAME                     = 'VAE_v1'
 KEEP_LOG_EVENTS             = False
 
@@ -23,6 +26,8 @@ LATENT_DIMENSION            = 28
 # Dataset parameters
 
 INPUT_IMAGE_SIZE            = (28,28,1)
+CLASSES_NAMES               = ['Zero','One','Two','Three','Four','Five','Six','Seven','Eigth','Nine']
+NUMBER_OF_CLASSES           = len(CLASSES_NAMES)
 
 #Training parameters
 
@@ -41,8 +46,9 @@ TRAIN_EPOCHS                = 20
 TRAIN_BATCH                 = 60
 TRAIN_PREFETCH              = -1
 TRAIN_SHUFFLE               = 1000
-TRAIN_LR_INIT               = 0.8e-3
-TRAIN_LR_END                = 1e-5
+TRAIN_LR_INIT               = 0.5e-3
+TRAIN_LR_END                = 1e-4
+LAMBDA_LK                   = 20.0
 # LR_VARIATION_EPOCH          = int(0.9*TRAIN_EPOCHS)
 # REGULARIZATION_START_EPOCH  = 1
 # REGULARIZATION_END_EPOCH    = 10
